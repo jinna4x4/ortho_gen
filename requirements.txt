@@ -1,0 +1,9 @@
+pyvista
+trimesh
+numpy
+scipy
+vtk
+networkx
+trame
+trame-vtk
+trame-vuetify
