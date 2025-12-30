@@ -47,6 +47,8 @@ class TorusToolApp:
         pv.OFF_SCREEN = True
         self.plotter = pv.Plotter(off_screen=True)
         self.plotter.set_background("slategray")
+        self.plotter.enable_lightkit()
+        self.plotter.enable_eye_dome_lighting()
         self.plotter.add_axes()
 
         # Build UI
@@ -111,50 +113,40 @@ class TorusToolApp:
                                 classes="mb-4"
                             )
 
-                            vuetify.VCard(
-                                classes="mb-4",
-                                children=[
-                                    vuetify.VCardTitle("Selected Points"),
-                                    vuetify.VCardText([
-                                        html.Div("{{ point1_text }}", classes="text-body-2", style="color: red;"),
-                                        html.Div("{{ point2_text }}", classes="text-body-2", style="color: green;"),
-                                        html.Div("{{ point3_text }}", classes="text-body-2", style="color: blue;"),
-                                        vuetify.VBtn(
-                                            "Clear Points",
-                                            click=self._clear_points,
-                                            block=True,
-                                            variant="outlined",
-                                            size="small",
-                                            classes="mt-3"
-                                        ),
-                                    ]),
-                                ]
-                            )
+                            with vuetify.VCard(classes="mb-4"):
+                                vuetify.VCardTitle("Selected Points")
+                                with vuetify.VCardText():
+                                    html.Div("{{ point1_text }}", classes="text-body-2", style="color: red;")
+                                    html.Div("{{ point2_text }}", classes="text-body-2", style="color: green;")
+                                    html.Div("{{ point3_text }}", classes="text-body-2", style="color: blue;")
+                                    vuetify.VBtn(
+                                        "Clear Points",
+                                        click=self._clear_points,
+                                        block=True,
+                                        variant="outlined",
+                                        size="small",
+                                        classes="mt-3"
+                                    )
 
-                            vuetify.VCard(
-                                classes="mb-4",
-                                children=[
-                                    vuetify.VCardTitle("Tube Radius"),
-                                    vuetify.VCardText([
-                                        vuetify.VSlider(
-                                            v_model=("minor_radius", 2.0),
-                                            min=0.1,
-                                            max=20,
-                                            step=0.1,
-                                            thumb_label="always",
-                                            hide_details=True,
-                                        ),
-                                        vuetify.VBtn(
-                                            "Update Preview",
-                                            click=self._on_radius_change,
-                                            block=True,
-                                            variant="text",
-                                            size="small",
-                                            classes="mt-2"
-                                        ),
-                                    ]),
-                                ]
-                            )
+                            with vuetify.VCard(classes="mb-4"):
+                                vuetify.VCardTitle("Tube Radius")
+                                with vuetify.VCardText():
+                                    vuetify.VSlider(
+                                        v_model=("minor_radius", 2.0),
+                                        min=0.1,
+                                        max=20,
+                                        step=0.1,
+                                        thumb_label="always",
+                                        hide_details=True,
+                                    )
+                                    vuetify.VBtn(
+                                        "Update Preview",
+                                        click=self._on_radius_change,
+                                        block=True,
+                                        variant="text",
+                                        size="small",
+                                        classes="mt-2"
+                                    )
 
                             vuetify.VBtn(
                                 "Preview Torus",
@@ -179,6 +171,9 @@ class TorusToolApp:
         if not path:
             self.state.status_message = "Please enter a file path"
             return
+
+        # Strip quotes if present (common when copy-pasting paths)
+        path = path.strip("'").strip('"')
 
         # Expand user home directory
         path = os.path.expanduser(path)
@@ -211,21 +206,29 @@ class TorusToolApp:
 
         # Display
         self.plotter.clear()
+        
+        # Ensure normals are computed for better shading
+        if self.source_mesh_pv.point_normals is None:
+            self.source_mesh_pv.compute_normals(inplace=True)
+
         self.plotter.add_mesh(
             self.source_mesh_pv,
-            color='white',
+            color='lightgrey',
+            smooth_shading=True,
+            specular=0.5,
             name='source_mesh',
             pickable=True
         )
         self.plotter.add_axes()
 
         # Enable picking
+        self.plotter.disable_picking()
         self.plotter.enable_point_picking(
             callback=self._on_point_picked,
-            use_mesh=True,
             show_message=False,
             show_point=False,
-            picker='cell'
+            picker='cell',
+            left_clicking=True
         )
 
         self.plotter.reset_camera()
@@ -240,6 +243,13 @@ class TorusToolApp:
             return
         if len(self.picked_points) >= 3:
             return
+
+        # Simple debounce: check if point is very close to the last one
+        if self.picked_points:
+            last_point = self.picked_points[-1]
+            dist = np.linalg.norm(np.array(point) - last_point)
+            if dist < 1e-6:
+                return
 
         self.picked_points.append(np.array(point))
 
@@ -265,6 +275,7 @@ class TorusToolApp:
             self.state.status_message = f"Click to place Point {len(self.picked_points) + 1}"
 
         self.ctrl.view_update()
+        self.state.flush()
 
     def _update_point_labels(self):
         """Update point labels in UI."""
@@ -272,9 +283,11 @@ class TorusToolApp:
         for i, key in enumerate(labels):
             if i < len(self.picked_points):
                 p = self.picked_points[i]
-                setattr(self.state, key, f"Point {i+1}: ({p[0]:.2f}, {p[1]:.2f}, {p[2]:.2f})")
+                # Use explicit assignment
+                self.state[key] = f"Point {i+1}: ({p[0]:.2f}, {p[1]:.2f}, {p[2]:.2f})"
             else:
-                setattr(self.state, key, f"Point {i+1}: -")
+                self.state[key] = f"Point {i+1}: -"
+        self.state.flush()
 
     def _clear_points_internal(self):
         """Clear points without updating view."""
@@ -355,19 +368,28 @@ class TorusToolApp:
 
         # Redisplay
         self.plotter.clear()
+        
+        # Ensure normals are computed for better shading
+        if self.source_mesh_pv.point_normals is None:
+            self.source_mesh_pv.compute_normals(inplace=True)
+
         self.plotter.add_mesh(
             self.source_mesh_pv,
-            color='white',
+            color='lightgrey',
+            smooth_shading=True,
+            specular=0.5,
             name='source_mesh',
             pickable=True
         )
         self.plotter.add_axes()
+        # Enable picking
+        self.plotter.disable_picking()
         self.plotter.enable_point_picking(
             callback=self._on_point_picked,
-            use_mesh=True,
             show_message=False,
             show_point=False,
-            picker='cell'
+            picker='cell',
+            left_clicking=True
         )
 
         self._clear_points_internal()

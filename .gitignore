@@ -1,9 +1,9 @@
-venv/
+.venv/
+.gemini-clipboard/
+*.log
+check_engines.py
+check_manifold_api.py
+reproduce_issue.py
+test_pyvista_clip.py
 __pycache__/
-*.pyc
-*.pyo
-.DS_Store
-*.egg-info/
-dist/
-build/
-.env
+*.stl

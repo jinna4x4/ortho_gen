@@ -7,3 +7,4 @@ networkx
 trame
 trame-vtk
 trame-vuetify
+manifold3d
